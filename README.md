@@ -1,6 +1,6 @@
 # Dice!Next Docker
 
-Dice!Next 的独立 Docker 镜像项目。镜像由 `DiceZone/Dice-Next` 成功发布 Release 后自动触发构建，不扫描或轮询上游仓库。
+Dice!Next 的独立 Docker 镜像项目。工作流每 6 小时检查一次 `DiceZone/Dice-Next` 的最新 Release；只有发现新标签时才构建镜像。也可手动触发，立即重建最新或指定标签。
 
 同一次多架构构建会同时发布到 GitHub Container Registry 与 Docker Hub：
 
@@ -34,11 +34,10 @@ docker run -d --name dice-next --restart unless-stopped \
 docker compose up -d
 ```
 
-## 自动触发
+## 构建触发
 
-主项目 Release 工作流会向本仓库发送 `repository_dispatch` 事件，并携带 Release 标签。该事件由 Docker 项目的 `build-image.yml` 接收后构建镜像。
-
-需要在 `DiceZone/Dice-Next` 设置仓库机密 `DICEZONE_CI_TOKEN`：它必须能访问 `DiceZone/Dice-Next-Docker`，并具有 Contents write 权限，以允许发送跨仓库 dispatch。
+- 自动检查：每 6 小时一次；新 Release 才会构建。
+- 手动检查：GitHub Actions → **Build Dice!Next Docker Image** → **Run workflow**。留空标签即重建最新 Release；填写标签可重建指定版本。
 
 在 `DiceZone/Dice-Next-Docker` 设置以下机密：
 

@@ -1,21 +1,21 @@
 name: Build Dice!Next Docker Image
 
 on:
-  repository_dispatch:
-    types: [dice-next-release]
+  schedule:
+    - cron: '17 */6 * * *'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Dice!Next GitHub Release tag, for example v3.0.0-beta.665'
-        required: true
+        description: 'Optional Dice!Next Release tag; leave empty to use the latest release.'
+        required: false
         type: string
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 concurrency:
-  group: dice-next-docker-${{ github.event.client_payload.tag || inputs.tag }}
+  group: dice-next-docker
   cancel-in-progress: false
 
 env:
@@ -25,36 +25,48 @@ env:
 
 jobs:
   resolve-release:
-    name: Resolve Dice!Next Release
+    name: Check Dice!Next Release
     runs-on: ubuntu-24.04
     outputs:
+      should_build: ${{ steps.release.outputs.should_build }}
       tag: ${{ steps.release.outputs.tag }}
       amd64_url: ${{ steps.release.outputs.amd64_url }}
       arm64_url: ${{ steps.release.outputs.arm64_url }}
     steps:
+      - uses: actions/checkout@v4
       - id: release
         env:
-          DISPATCH_TAG: ${{ github.event.client_payload.tag }}
           MANUAL_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
           SOURCE_TOKEN: ${{ secrets.DICE_NEXT_READ_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          tag="${DISPATCH_TAG:-$MANUAL_TAG}"
-          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || {
-            echo "Invalid Dice!Next release tag: $tag" >&2
-            exit 1
-          }
           headers=(-H 'Accept: application/vnd.github+json')
           if [[ -n "$SOURCE_TOKEN" ]]; then
             headers+=(-H "Authorization: Bearer $SOURCE_TOKEN")
           fi
-          release=$(curl --fail --silent --show-error --location "${headers[@]}" \
-            "https://api.github.com/repos/${SOURCE_REPOSITORY}/releases/tags/${tag}")
+          if [[ -n "$MANUAL_TAG" ]]; then
+            endpoint="https://api.github.com/repos/${SOURCE_REPOSITORY}/releases/tags/${MANUAL_TAG}"
+          else
+            endpoint="https://api.github.com/repos/${SOURCE_REPOSITORY}/releases/latest"
+          fi
+          release=$(curl --fail --silent --show-error --location "${headers[@]}" "$endpoint")
+          tag=$(jq -r '.tag_name' <<< "$release")
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || {
+            echo "Unexpected Dice!Next release tag: $tag" >&2
+            exit 1
+          }
+          previous=$(tr -d '[:space:]' < last_release_tag.txt 2>/dev/null || true)
+          should_build=false
+          if [[ "$EVENT_NAME" == workflow_dispatch || "$tag" != "$previous" ]]; then
+            should_build=true
+          fi
           amd64_url=$(jq -r '.assets[] | select(.name | test("-linux-amd64-.*\\.tar\\.gz$")) | .browser_download_url' <<< "$release" | head -n1)
           arm64_url=$(jq -r '.assets[] | select(.name | test("-linux-arm64-.*\\.tar\\.gz$")) | .browser_download_url' <<< "$release" | head -n1)
           [[ -n "$amd64_url" && "$amd64_url" != null ]] || { echo 'Linux amd64 package is missing' >&2; exit 1; }
           [[ -n "$arm64_url" && "$arm64_url" != null ]] || { echo 'Linux arm64 package is missing' >&2; exit 1; }
+          printf 'should_build=%s\n' "$should_build" >> "$GITHUB_OUTPUT"
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
           printf 'amd64_url=%s\n' "$amd64_url" >> "$GITHUB_OUTPUT"
           printf 'arm64_url=%s\n' "$arm64_url" >> "$GITHUB_OUTPUT"
@@ -62,6 +74,7 @@ jobs:
   build-and-push:
     name: Build and Push Multi-arch Image
     needs: resolve-release
+    if: needs.resolve-release.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -104,3 +117,23 @@ jobs:
             ${{ env.DOCKERHUB_IMAGE }}:${{ needs.resolve-release.outputs.tag }}
             ${{ env.DOCKERHUB_IMAGE }}:beta
             ${{ env.DOCKERHUB_IMAGE }}:latest
+
+  record-release:
+    name: Record Published Release
+    needs: [resolve-release, build-and-push]
+    if: needs.resolve-release.outputs.should_build == 'true' && needs.build-and-push.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record successful image source
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$RELEASE_TAG" > last_release_tag.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add last_release_tag.txt
+          git commit -m "chore: record Dice!Next release ${RELEASE_TAG}"
+          git push
