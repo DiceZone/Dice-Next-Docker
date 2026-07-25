@@ -1,0 +1,106 @@
+name: Build Dice!Next Docker Image
+
+on:
+  repository_dispatch:
+    types: [dice-next-release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Dice!Next GitHub Release tag, for example v3.0.0-beta.665'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: dice-next-docker-${{ github.event.client_payload.tag || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPOSITORY: DiceZone/Dice-Next
+  IMAGE_NAME: ghcr.io/dicezone/dice-next
+  DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_REPOSITORY || 'shiaworkshop/dice-next' }}
+
+jobs:
+  resolve-release:
+    name: Resolve Dice!Next Release
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      amd64_url: ${{ steps.release.outputs.amd64_url }}
+      arm64_url: ${{ steps.release.outputs.arm64_url }}
+    steps:
+      - id: release
+        env:
+          DISPATCH_TAG: ${{ github.event.client_payload.tag }}
+          MANUAL_TAG: ${{ inputs.tag }}
+          SOURCE_TOKEN: ${{ secrets.DICE_NEXT_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${DISPATCH_TAG:-$MANUAL_TAG}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || {
+            echo "Invalid Dice!Next release tag: $tag" >&2
+            exit 1
+          }
+          headers=(-H 'Accept: application/vnd.github+json')
+          if [[ -n "$SOURCE_TOKEN" ]]; then
+            headers+=(-H "Authorization: Bearer $SOURCE_TOKEN")
+          fi
+          release=$(curl --fail --silent --show-error --location "${headers[@]}" \
+            "https://api.github.com/repos/${SOURCE_REPOSITORY}/releases/tags/${tag}")
+          amd64_url=$(jq -r '.assets[] | select(.name | test("-linux-amd64-.*\\.tar\\.gz$")) | .browser_download_url' <<< "$release" | head -n1)
+          arm64_url=$(jq -r '.assets[] | select(.name | test("-linux-arm64-.*\\.tar\\.gz$")) | .browser_download_url' <<< "$release" | head -n1)
+          [[ -n "$amd64_url" && "$amd64_url" != null ]] || { echo 'Linux amd64 package is missing' >&2; exit 1; }
+          [[ -n "$arm64_url" && "$arm64_url" != null ]] || { echo 'Linux arm64 package is missing' >&2; exit 1; }
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'amd64_url=%s\n' "$amd64_url" >> "$GITHUB_OUTPUT"
+          printf 'arm64_url=%s\n' "$arm64_url" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    name: Build and Push Multi-arch Image
+    needs: resolve-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify Docker Hub credentials
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$DOCKERHUB_USERNAME" ]] || { echo 'DOCKERHUB_USERNAME is not configured' >&2; exit 1; }
+          [[ -n "$DOCKERHUB_TOKEN" ]] || { echo 'DOCKERHUB_TOKEN is not configured' >&2; exit 1; }
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            RELEASE_URL_AMD64=${{ needs.resolve-release.outputs.amd64_url }}
+            RELEASE_URL_ARM64=${{ needs.resolve-release.outputs.arm64_url }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/DiceZone/Dice-Next-Docker
+            org.opencontainers.image.url=https://github.com/DiceZone/Dice-Next
+            org.opencontainers.image.version=${{ needs.resolve-release.outputs.tag }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.resolve-release.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:beta
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.DOCKERHUB_IMAGE }}:${{ needs.resolve-release.outputs.tag }}
+            ${{ env.DOCKERHUB_IMAGE }}:beta
+            ${{ env.DOCKERHUB_IMAGE }}:latest

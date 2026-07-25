@@ -1,0 +1,14 @@
+services:
+  dice-next:
+    image: ghcr.io/dicezone/dice-next:latest
+    container_name: dice-next
+    restart: unless-stopped
+    ports:
+      - "18088:18088"
+    volumes:
+      - dice-next-config:/app/config
+      - dice-next-data:/app/data
+
+volumes:
+  dice-next-config:
+  dice-next-data:
