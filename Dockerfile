@@ -29,8 +29,12 @@ RUN set -eux; \
 
 WORKDIR /app
 
-COPY docker-entrypoint.sh configure-napcat.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/dice-next-entrypoint /usr/local/bin/configure-napcat.sh
+COPY docker-entrypoint.sh /usr/local/bin/dice-next-entrypoint
+COPY configure-napcat.sh /usr/local/bin/configure-napcat.sh
+# Build contexts may originate on Windows. Normalize script line endings before
+# execution so `/usr/bin/env sh\r` cannot break container startup.
+RUN sed -i 's/\r$//' /usr/local/bin/dice-next-entrypoint /usr/local/bin/configure-napcat.sh \
+    && chmod +x /usr/local/bin/dice-next-entrypoint /usr/local/bin/configure-napcat.sh
 
 EXPOSE 18088
 
