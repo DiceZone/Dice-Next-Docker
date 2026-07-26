@@ -1,14 +1,37 @@
 services:
   dice-next:
-    image: ghcr.io/dicezone/dice-next:latest
+    image: shiaworkshop/dice-next:latest
     container_name: dice-next
     restart: unless-stopped
+    environment:
+      MODE: napcat
     ports:
       - "18088:18088"
     volumes:
-      - dice-next-config:/app/config
-      - dice-next-data:/app/data
+      - "${PWD}/config:/app/config"
+      - "${PWD}/data:/app/data"
+    networks:
+      - dice-next
+    depends_on:
+      - napcat
 
-volumes:
-  dice-next-config:
-  dice-next-data:
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    hostname: dice-next-napcat
+    restart: unless-stopped
+    environment:
+      NAPCAT_UID: ${NAPCAT_UID:-1000}
+      NAPCAT_GID: ${NAPCAT_GID:-1000}
+    ports:
+      - "6099:6099"
+    volumes:
+      - "${PWD}/napcat/config:/app/napcat/config"
+      - "${PWD}/napcat/QQ_DATA:/app/.config/QQ"
+      - "${PWD}/qrcode:/app/napcat/cache"
+    networks:
+      - dice-next
+
+networks:
+  dice-next:
+    driver: bridge

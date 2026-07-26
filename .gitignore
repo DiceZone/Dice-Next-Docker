@@ -1,2 +1,8 @@
 .DS_Store
 .env
+config/
+data/
+qrcode/
+napcat/QQ_DATA/
+napcat/config/onebot11_*.json
+napcat/config/webui.json

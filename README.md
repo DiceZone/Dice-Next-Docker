@@ -21,18 +21,37 @@ shiaworkshop/dice-next:v3.0.0-beta.NNN
 ```bash
 docker run -d --name dice-next --restart unless-stopped \
   -p 18088:18088 \
-  -v dice-next-config:/app/config \
-  -v dice-next-data:/app/data \
+  -v "$(pwd)/config:/app/config" \
+  -v "$(pwd)/data:/app/data" \
   ghcr.io/dicezone/dice-next:latest
 ```
 
-首次启动后访问 `http://localhost:18088`。`config` 与 `data` 是持久化 Docker 卷；升级镜像时请保留它们。
+默认 Compose 会同时启动 Dice!Next 与 NapCat：
+
+- Dice!Next WebUI：`http://localhost:18088`
+- NapCat WebUI：`http://localhost:6099/webui`
+
+首次启动后在 NapCat WebUI 登录 QQ。Dice!Next 的 QQ OneBot 适配器已预设为反向 WebSocket `3002`，NapCat 已预设为连接同一 Compose 网络内的 `ws://dice-next:3002`。`config`、`data`、`napcat/QQ_DATA` 和 `qrcode` 都保存在 Compose 文件所在目录；升级镜像时请保留这些目录。镜像会在首次启动时把内置规则、帮助和示例资源初始化到空的 `./data` 中。
 
 也可使用本项目的 `docker-compose.yml`：
 
 ```bash
 docker compose up -d
 ```
+
+## NapCat 反向 WebSocket 模式
+
+默认 Compose 已启用与旧 Docker 项目相同的 `MODE=napcat` 行为，会在启动时自动整理 Dice!Next 的 QQ / OneBot 配置：
+
+```bash
+docker compose up -d
+```
+
+该模式会把 QQ OneBot 适配器设为 **反向 WebSocket**，监听容器内 `3002` 端口。首次运行会写入 `config/default_config.json`；已有安装还会同步更新 `data/dice.db` 中的运行时适配器配置。原配置分别保留为 `.pre-napcat` 备份。由于一个反向监听端口只能对应一个 QQ OneBot 适配器，此模式会保留一个 QQ 适配器，其余平台适配器不受影响。
+
+仓库内的 `napcat/config/onebot11.json` 是 NapCat 的默认 OneBot 网络配置，会自动创建反向 WS 客户端并连接 `ws://dice-next:3002`。若改用外部 NapCat，请在其网络配置中新建“WebSocket 客户端”，填写 Dice!Next 可访问地址；`3002` 默认不暴露给宿主机。
+
+使用 `docker run` 时追加 `-e MODE=napcat` 即可启用相同逻辑。
 
 ## 构建触发
 
