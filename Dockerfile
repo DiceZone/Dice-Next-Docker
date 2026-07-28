@@ -7,7 +7,7 @@ ARG RELEASE_URL_ARM64
 ENV TZ=Asia/Hong_Kong
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl jq libicu74 libsqlite3-0 libstdc++6 sqlite3 tar tzdata unzip zlib1g \
+    && apt-get install -y --no-install-recommends ca-certificates curl jq libicu74 libsqlite3-0 libstdc++6 sqlite3 tar tzdata unzip zip zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
