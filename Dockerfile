@@ -27,6 +27,8 @@ RUN set -eux; \
     rm -rf /tmp/release /tmp/dice-next.tar.gz; \
     chmod +x /app/dice-next-server /app/start.sh
 
+RUN useradd -m -u 10001 appuser && chown -R appuser:appuser /app /app-seed   # M2: 最小权限用户（配合 compose 去特权能力）
+
 WORKDIR /app
 
 COPY docker-entrypoint.sh /usr/local/bin/dice-next-entrypoint

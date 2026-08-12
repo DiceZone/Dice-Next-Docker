@@ -6,6 +6,14 @@ services:
       MODE: napcat
     ports:
       - "18088:18088"
+    # M2: 最小权限加固（保持运行，但去掉特权能力/写根文件系统）
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     volumes:
       - "${PWD}/config:/app/config"
       - "${PWD}/data:/app/data"
