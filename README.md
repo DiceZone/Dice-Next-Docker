@@ -53,6 +53,12 @@ docker compose up -d
 
 使用 `docker run` 时追加 `-e MODE=napcat` 即可启用相同逻辑。
 
+## BDC 公寓托管模式
+
+`MODE=diceflats` 专供 Better Dice Control 的受管实例使用。此模式只开放容器回环地址可访问的托管引导接口；节点 daemon 取得该实例自动生成的 `X-API-Key` 后，通过 Dice!Next 正式 API 配置 OneBot 适配器、骰主、BDC 骰娘 Key 与旧版数据导入。
+
+业务密钥、临时会话和配置脚本不会写入 Compose。普通自托管用户无需启用此模式，也无法从宿主机或外部网络调用托管引导接口。
+
 ## 构建触发
 
 - 自动检查：每 6 小时一次；新 Release 才会构建。
