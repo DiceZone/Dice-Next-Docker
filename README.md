@@ -39,6 +39,23 @@ docker run -d --name dice-next --restart unless-stopped \
 docker compose up -d
 ```
 
+## 更新容器
+
+官方镜像通过 `DICENEXT_CONTAINER=1` 明确标记容器环境；Dice!Next 也会以
+`/.dockerenv`、`/run/.containerenv`、Kubernetes 环境变量和 cgroup 信息作为
+兜底。容器内仍会检查 GitHub Release 并通知新版本，但不会下载或安装程序
+更新，避免修改一次性容器层或绕过镜像编排。
+
+使用 Compose 时拉取新镜像并重新创建服务：
+
+```bash
+docker compose pull dice-next
+docker compose up -d --force-recreate dice-next
+```
+
+直接使用 `docker run` 时，请拉取新镜像，再按原参数重新创建容器。挂载的
+`config` 与 `data` 目录不随容器删除；重新创建前仍建议备份重要数据。
+
 ## NapCat 反向 WebSocket 模式
 
 默认 Compose 已启用与旧 Docker 项目相同的 `MODE=napcat` 行为，会在启动时自动整理 Dice!Next 的 QQ / OneBot 配置：

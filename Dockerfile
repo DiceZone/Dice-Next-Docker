@@ -4,7 +4,8 @@ ARG TARGETARCH
 ARG RELEASE_URL_AMD64
 ARG RELEASE_URL_ARM64
 
-ENV TZ=Asia/Hong_Kong
+ENV TZ=Asia/Hong_Kong \
+    DICENEXT_CONTAINER=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl jq libicu74 libsqlite3-0 libstdc++6 sqlite3 tar tzdata unzip zip zlib1g \
