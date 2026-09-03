@@ -98,6 +98,111 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build amd64 candidate for runtime smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          build-args: |
+            RELEASE_URL_AMD64=${{ needs.resolve-release.outputs.amd64_url }}
+            RELEASE_URL_ARM64=${{ needs.resolve-release.outputs.arm64_url }}
+          tags: dice-next-smoke:${{ github.run_id }}-${{ github.run_attempt }}
+          cache-from: type=gha,scope=dice-next-image
+          cache-to: type=gha,mode=max,scope=dice-next-image
+      - name: Verify container runtime and self-update boundary
+        env:
+          SMOKE_IMAGE: dice-next-smoke:${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          container="dice-next-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          work_dir=$(mktemp -d)
+          cookie_jar="$work_dir/cookies.txt"
+
+          cleanup() {
+            docker rm --force "$container" >/dev/null 2>&1 || true
+            rm -rf "$work_dir"
+          }
+          show_logs() {
+            echo '--- Dice!Next container logs ---' >&2
+            docker logs "$container" >&2 || true
+          }
+          trap cleanup EXIT
+          trap show_logs ERR
+
+          docker run --detach --name "$container" \
+            --publish 127.0.0.1::18088 \
+            "$SMOKE_IMAGE" >/dev/null
+
+          endpoint=$(docker port "$container" 18088/tcp | head -n1)
+          port=${endpoint##*:}
+          base_url="http://127.0.0.1:$port"
+          ready=false
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --show-error \
+              "$base_url/api/auth/status" > "$work_dir/auth-status.json"; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != true ]]; then
+            echo 'Dice!Next did not become ready within 60 seconds' >&2
+            show_logs
+            exit 1
+          fi
+          jq -e '.code == 0 and .data.need_setup == true' \
+            "$work_dir/auth-status.json" >/dev/null
+
+          password='DnSmoke-2026!'
+          jq -nc --arg password "$password" \
+            '{password: $password, trust_device: false}' > "$work_dir/setup-request.json"
+          curl --fail --silent --show-error \
+            --cookie-jar "$cookie_jar" \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$work_dir/setup-request.json" \
+            "$base_url/api/auth/setup" > "$work_dir/setup-response.json"
+          jq -e '.code == 0 and .data.authed == true' \
+            "$work_dir/setup-response.json" >/dev/null
+
+          curl --fail --silent --show-error \
+            --cookie "$cookie_jar" \
+            "$base_url/api/system/update" > "$work_dir/update-status.json"
+          jq -e '
+            .code == 0 and
+            .data.runtime.container == true and
+            .data.downloadSupported == false and
+            .data.installSupported == false and
+            .data.selfUpdateBlockedReason == "container"
+          ' "$work_dir/update-status.json" >/dev/null
+
+          for endpoint in download install; do
+            curl --fail --silent --show-error \
+              --cookie "$cookie_jar" \
+              --request POST \
+              "$base_url/api/system/update/$endpoint" \
+              > "$work_dir/$endpoint-response.json"
+            jq -e '
+              .code != 0 and
+              (.message | contains("disabled inside containers"))
+            ' "$work_dir/$endpoint-response.json" >/dev/null
+          done
+
+          curl --fail --silent --show-error \
+            --cookie "$cookie_jar" \
+            --header 'Content-Type: application/json' \
+            --request PUT \
+            --data '{"autoAction":"download"}' \
+            "$base_url/api/system/update" > "$work_dir/auto-action-response.json"
+          jq -e '
+            .code != 0 and
+            (.message | contains("disabled inside containers"))
+          ' "$work_dir/auto-action-response.json" >/dev/null
+
+          docker inspect --format '{{.State.Running}}' "$container" | grep -Fx true
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -106,6 +211,7 @@ jobs:
           build-args: |
             RELEASE_URL_AMD64=${{ needs.resolve-release.outputs.amd64_url }}
             RELEASE_URL_ARM64=${{ needs.resolve-release.outputs.arm64_url }}
+          cache-from: type=gha,scope=dice-next-image
           labels: |
             org.opencontainers.image.source=https://github.com/DiceZone/Dice-Next-Docker
             org.opencontainers.image.url=https://github.com/DiceZone/Dice-Next
